@@ -31,5 +31,5 @@ while true; do
     echo "Sequencer Block Number: $sequencer_block_number"
     echo "RPC Block Number: $rpc_block_number"
 
-    sleep 5
+    sleep 3
 done
