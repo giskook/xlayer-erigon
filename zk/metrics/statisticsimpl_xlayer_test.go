@@ -26,7 +26,6 @@ func TestStatisticsInstanceSummary(t *testing.T) {
 				GetTxPauseTiming:              time.Second.Milliseconds() * 30,
 				ReprocessingTxCounter:         3,
 				FailTxGasOverCounter:          1,
-				FailTxResourceOverCounter:     1,
 				ZKOverflowBlockCounter:        1,
 				ProcessingInvalidTxCounter:    2,
 				SequencingBatchTiming:         time.Second.Milliseconds() * 20,
