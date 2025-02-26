@@ -8,8 +8,8 @@ import (
 func TestStatisticsInstanceSummary(t *testing.T) {
 	type fields struct {
 		timestamp  time.Time
-		statistics map[logTag]int64
-		tags       map[logTag]string
+		statistics map[LogTag]int64
+		tags       map[LogTag]string
 	}
 	tests := []struct {
 		name   string
@@ -18,7 +18,7 @@ func TestStatisticsInstanceSummary(t *testing.T) {
 	}{
 		{"1", fields{
 			timestamp: time.Now().Add(-time.Second),
-			statistics: map[logTag]int64{
+			statistics: map[LogTag]int64{
 				BatchGas:                      111111,
 				TxCounter:                     10,
 				GetTxTiming:                   time.Second.Milliseconds(),
@@ -47,8 +47,17 @@ func TestStatisticsInstanceSummary(t *testing.T) {
 				ZKHashSMTDeleteHashKeyTiming:   5100,
 				ZKHashSMTInsertKeyTiming:       6100,
 				ZKHashSMTGetKeyTiming:          7100,
+
+				HermezSmtStats:    1100,
+				HermezSmtMetadata: 2100,
+				HermezSmt:         3200,
+				HermezSmtHashKey:  4200,
+
+				Delete: 5000,
+				Append: 6000,
+				Put:    7000,
 			},
-			tags: map[logTag]string{BatchCloseReason: "deadline", FinalizeBatchNumber: "123"},
+			tags: map[LogTag]string{BatchCloseReason: "deadline", FinalizeBatchNumber: "123", HermezSmtStats: "1", HermezSmtMetadata: "2", HermezSmt: "3", HermezSmtHashKey: "4"},
 		}, "test"},
 	}
 	for _, tt := range tests {
