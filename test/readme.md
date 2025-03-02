@@ -36,3 +36,20 @@ L2 admin: 0x8f8E2d6cF621f30e9a11309D6A56A876281Fd534
 curl http://127.0.0.1:9092/debug/metrics/prometheus
 curl http://127.0.0.1:9092/debug/metrics
 ```
+
+# Debug erigon with IDE
+1. Start erigon with debug mode
+```
+make run-local
+```
+2.1. Attach to the process with IDE
+```
+Run->Debug->Attach to Process
+```
+2.2 Or Run with IDE directly
+```
+killall erigon
+# config the erigon path in the IDE like this
+export CDK_ERIGON_SEQUENCER=1;nohup cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=./config/test.erigon.seq.config.yaml --zkevm.l1-rpc-url=http://127.0.0.1:8545 --http.port=8123 --datadir=./data/seq/ &
+
+```
