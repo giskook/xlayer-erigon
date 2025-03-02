@@ -119,6 +119,9 @@ services:
     image: cdk-erigon
     environment:
       - CDK_ERIGON_SEQUENCER=0
+      - SEQUENCER_URL=${SEQUENCER_URL}
+      - POOL_MGR_URL=${POOL_MGR_URL}
+      - DATASTREAM_URL=${DATASTREAM_URL}
     ports:
       - 6061:6060
       - 8124:8545
@@ -131,7 +134,7 @@ services:
       - ./config/dynamic-mynetwork-chainspec.json:/usr/src/app/dynamic-mynetwork-chainspec.json
       - ./config/dynamic-mynetwork-conf.json:/usr/src/app/dynamic-mynetwork-conf.json
     command: >
-      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml
+      cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=/usr/src/app/config.yaml ${SEQUENCER_URL} ${POOL_MGR_URL} ${DATASTREAM_URL}
 
   xlayer-mock-l1-network:
     container_name: xlayer-mock-l1-network

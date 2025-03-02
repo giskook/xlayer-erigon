@@ -121,6 +121,7 @@ xlayerconfig-testnet.yaml
 test/mainnet
 test/*.zip
 test/*.tar.gz
+test/nohup.out
 
 datadir
 zk/tests/unwinds/datastream/hermez-dynamic-integration8-datastream

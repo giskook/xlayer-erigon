@@ -83,6 +83,27 @@ run: build-docker ## Runs a full node
 	$(RUN_DOCKER_PROMETHEUS)
 	$(RUN_DOCKER_GRAFANA)
 
+run-local: #build-docker ## Runs a full node
+	#cd ../ && make cdk-erigon; rm -rf $GOPATH/bin/cdk-erigon; cp build/bin/cdk-erigon $GOPATH/bin/; cd -;
+	# base services
+	$(RUN_DOCKER_L1_NETWORK)
+	$(RUN_DOCKER_DATA_AVAILABILITY_DB)
+	$(RUN_DOCKER_AGGREGATOR_DB)
+	sleep 3
+	$(RUN_DOCKER_DATA_AVAILABILITY)
+	$(RUN_DOCKER_APPROVE)
+	$(RUN_DOCKER_STATELESS_EXECUTOR)
+
+	# app services
+	sleep 3
+	export CDK_ERIGON_SEQUENCER=1;nohup cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=./config/test.erigon.seq.config.yaml --zkevm.l1-rpc-url=http://127.0.0.1:8545 --http.port=8123 --datadir=./data/seq/ &
+
+	$(RUN_DOCKER_PROVER)
+	sleep 10
+	$(RUN_DOCKER_SEQ_SENDER)
+	$(RUN_DOCKER_AGGREGATOR)
+	SEQUENCER_URL="--zkevm.l2-sequencer-rpc-url=http://host.docker.internal:8123" POOL_MGR_URL="--zkevm.pool-manager-url=" DATASTREAM_URL="--zkevm.l2-datastreamer-url=host.docker.internal:6900" docker-compose up -d xlayer-rpc
+
 .PHONY: all
 all: build-docker ## Runs a full node
 	# base services
@@ -123,6 +144,7 @@ all: build-docker ## Runs a full node
 
 .PHONY: stop
 stop: ## Stops all services
+	killall -q cdk-erigon || true
 	$(STOP)
 
 .PHONY: min-run
