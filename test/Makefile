@@ -84,6 +84,7 @@ run: build-docker ## Runs a full node
 	$(RUN_DOCKER_GRAFANA)
 
 run-local: build-docker ## Runs a full node
+	export PATH=$GOPATH/bin:$PATH
 	cd ../ && make cdk-erigon; rm -rf $GOPATH/bin/cdk-erigon; cp build/bin/cdk-erigon $GOPATH/bin/; cd -;
 	# base services
 	$(RUN_DOCKER_L1_NETWORK)
