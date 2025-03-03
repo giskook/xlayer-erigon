@@ -37,10 +37,25 @@ curl http://127.0.0.1:9092/debug/metrics/prometheus
 curl http://127.0.0.1:9092/debug/metrics
 ```
 
-# Debug erigon with IDE
+# Debug erigon with IDE for make run
 1. Start erigon with debug mode
 ```
-make run-local
+make run-debug
+```
+2.1. Attach to the process with IDE
+```
+Run->Debug->Attach to Process
+```
+2.2 Or Run with IDE directly
+```
+killall erigon
+# config the erigon path in the IDE like this
+export CDK_ERIGON_SEQUENCER=1;nohup cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=./config/test.erigon.seq.config.yaml --zkevm.l1-rpc-url=http://127.0.0.1:8545 --http.port=8123 --datadir=./data/seq/ &
+
+# Debug erigon with IDE for make mainnet-debug
+1. Start erigon with debug mode
+```
+make mainnet-debug
 ```
 2.1. Attach to the process with IDE
 ```

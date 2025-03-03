@@ -83,7 +83,7 @@ run: build-docker ## Runs a full node
 	$(RUN_DOCKER_PROMETHEUS)
 	$(RUN_DOCKER_GRAFANA)
 
-run-local: build-docker ## Runs a full node
+run-debug: build-docker ## Runs a full node
 	export PATH=$GOPATH/bin:$PATH
 	cd ../ && make cdk-erigon; rm -rf $GOPATH/bin/cdk-erigon; cp build/bin/cdk-erigon $GOPATH/bin/; cd -;
 	# base services
@@ -176,6 +176,12 @@ mainnet: build-docker
 	# monitoring services
 	$(RUN_DOCKER_PROMETHEUS)
 	$(RUN_DOCKER_GRAFANA)
+
+mainnet-debug: build-docker
+	export PATH=$GOPATH/bin:$PATH
+	cd ../ && make cdk-erigon; rm -rf $GOPATH/bin/cdk-erigon; cp build/bin/cdk-erigon $GOPATH/bin/; cd -;
+	sleep 3
+	export CDK_ERIGON_SEQUENCER=1;nohup cdk-erigon --http.vhosts=* --http.corsdomain=* --ws --config=./config/xlayerconfig-mainnet.yaml --http.port=8123 --datadir=./mainnet/seq/ &
 
 vmtouch:
 	docker exec -it xlayer-seq sh -c "vmtouch -t /home/erigon/data/chaindata/mdbx.dat"
