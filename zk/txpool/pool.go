@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/status-im/keycard-go/hexutils"
 
@@ -121,37 +122,38 @@ const (
 type DiscardReason uint8
 
 const (
-	NotSet                          DiscardReason = 0 // analog of "nil-value", means it will be set in future
-	Success                         DiscardReason = 1
-	AlreadyKnown                    DiscardReason = 2
-	Mined                           DiscardReason = 3
-	ReplacedByHigherTip             DiscardReason = 4
-	UnderPriced                     DiscardReason = 5
-	ReplaceUnderpriced              DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
-	FeeTooLow                       DiscardReason = 7
-	OversizedData                   DiscardReason = 8
-	InvalidSender                   DiscardReason = 9
-	NegativeValue                   DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
-	Spammer                         DiscardReason = 11
-	PendingPoolOverflow             DiscardReason = 12
-	BaseFeePoolOverflow             DiscardReason = 13
-	QueuedPoolOverflow              DiscardReason = 14
-	GasUintOverflow                 DiscardReason = 15
-	IntrinsicGas                    DiscardReason = 16
-	RLPTooLong                      DiscardReason = 17
-	NonceTooLow                     DiscardReason = 18
-	InsufficientFunds               DiscardReason = 19
-	NotReplaced                     DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
-	DuplicateHash                   DiscardReason = 21 // There was an existing transaction with the same hash
-	InitCodeTooLarge                DiscardReason = 22 // EIP-3860 - transaction init code is too large
-	UnsupportedTx                   DiscardReason = 23 // unsupported transaction type
-	OverflowZkCounters              DiscardReason = 24 // unsupported transaction type
-	SenderDisallowedSendTx          DiscardReason = 25 // sender is not allowed to send transactions by ACL policy
-	SenderDisallowedDeploy          DiscardReason = 26 // sender is not allowed to deploy contracts by ACL policy
-	DiscardByLimbo                  DiscardReason = 27
-	SmartContractDeploymentDisabled DiscardReason = 28 // to == null not allowed, config set to block smart contract deployment
-	GasLimitTooHigh                 DiscardReason = 29 // gas limit is too high
-	Expired                         DiscardReason = 30 // used when a transaction is purged from the pool
+	NotSet                            DiscardReason = 0 // analog of "nil-value", means it will be set in future
+	Success                           DiscardReason = 1
+	AlreadyKnown                      DiscardReason = 2
+	Mined                             DiscardReason = 3
+	ReplacedByHigherTip               DiscardReason = 4
+	UnderPriced                       DiscardReason = 5
+	ReplaceUnderpriced                DiscardReason = 6 // if a transaction is attempted to be replaced with a different one without the required price bump.
+	FeeTooLow                         DiscardReason = 7
+	OversizedData                     DiscardReason = 8
+	InvalidSender                     DiscardReason = 9
+	NegativeValue                     DiscardReason = 10 // ensure no one is able to specify a transaction with a negative value.
+	Spammer                           DiscardReason = 11
+	PendingPoolOverflow               DiscardReason = 12
+	BaseFeePoolOverflow               DiscardReason = 13
+	QueuedPoolOverflow                DiscardReason = 14
+	GasUintOverflow                   DiscardReason = 15
+	IntrinsicGas                      DiscardReason = 16
+	RLPTooLong                        DiscardReason = 17
+	NonceTooLow                       DiscardReason = 18
+	InsufficientFunds                 DiscardReason = 19
+	NotReplaced                       DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
+	DuplicateHash                     DiscardReason = 21 // There was an existing transaction with the same hash
+	InitCodeTooLarge                  DiscardReason = 22 // EIP-3860 - transaction init code is too large
+	UnsupportedTx                     DiscardReason = 23 // unsupported transaction type
+	OverflowZkCounters                DiscardReason = 24 // unsupported transaction type
+	SenderDisallowedSendTx            DiscardReason = 25 // sender is not allowed to send transactions by ACL policy
+	SenderDisallowedDeploy            DiscardReason = 26 // sender is not allowed to deploy contracts by ACL policy
+	DiscardByLimbo                    DiscardReason = 27
+	SmartContractDeploymentDisabled   DiscardReason = 28 // to == null not allowed, config set to block smart contract deployment
+	GasLimitTooHigh                   DiscardReason = 29 // gas limit is too high
+	Expired                           DiscardReason = 30 // used when a transaction is purged from the pool
+	FromAddressDisallowedTransferFrom DiscardReason = 31 // from address is not allowed to transferFrom
 
 	// For X Layer
 	ReceiverDisallowedReceiveTx DiscardReason = 127 // receiver is not allowed to receive transactions
@@ -214,6 +216,8 @@ func (r DiscardReason) String() string {
 		return "sender disallowed to send tx by ACL policy"
 	case ReceiverDisallowedReceiveTx: // XLayer operation
 		return "blocked receiver"
+	case FromAddressDisallowedTransferFrom:
+		return "blocked transferFrom 'from' address"
 	case NoWhiteListedSender:
 		return "You are not allowed to send transactions on the X Layer as we are under the phase 1, X layer will be open to the public soon"
 	case SenderDisallowedDeploy:
@@ -751,6 +755,75 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 	}
 }
 
+func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.OrderedList[common.Address]) bool {
+
+	fmt.Printf("TX TRACING: Full RLP: %x\n", txn.Rlp)
+
+	if txn.Creation || txn.To == (common.Address{}) {
+		return false
+	}
+
+	transferFromSig := []byte{0x23, 0xb8, 0x72, 0xdd}
+
+	data, err := getTxData(txn)
+	if err != nil {
+		return false
+	}
+
+	if len(data) < 4 {
+		return false
+	}
+
+	methodID := data[:4]
+	fmt.Printf("TX TRACING: Method ID: %x\n", methodID)
+
+	if !bytes.Equal(methodID, transferFromSig) {
+		return false
+	}
+
+	if len(data) < 36 {
+		return false
+	}
+
+	fromParam := common.BytesToAddress(data[4+12 : 4+32])
+	fmt.Printf("TX TRACING: From Parameter: %x\n", fromParam)
+
+	return blockedList.Contains(fromParam)
+}
+
+func getTxData(tx *types.TxSlot) ([]byte, error) {
+	switch tx.Type {
+	case 0x00: // Legacy Transaction
+		var txFields []interface{}
+		if err := rlp.DecodeBytes(tx.Rlp, &txFields); err != nil {
+			return nil, err
+		}
+		if len(txFields) < 6 {
+			return nil, fmt.Errorf("invalid RLP data")
+		}
+		data, ok := txFields[5].([]byte)
+		if !ok {
+			return nil, fmt.Errorf("no valid data field")
+		}
+		return data, nil
+	case 0x02: // EIP-1559
+		var txFields []interface{}
+		if err := rlp.DecodeBytes(tx.Rlp[1:], &txFields); err != nil {
+			return nil, err
+		}
+		if len(txFields) < 8 {
+			return nil, fmt.Errorf("invalid RLP data")
+		}
+		data, ok := txFields[7].([]byte)
+		if !ok {
+			return nil, fmt.Errorf("no valid data field")
+		}
+		return data, nil
+	default:
+		return nil, fmt.Errorf("unsupported tx type: %d", tx.Type)
+	}
+}
+
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView, from common.Address) DiscardReason {
 	isShanghai := p.isShanghai()
 	if isShanghai {
@@ -836,6 +909,12 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	if p.apolloCfg.CheckBlockedAddr(p.xlayerCfg.BlockedList, from) {
 		log.Info(fmt.Sprintf("TX TRACING: validateTx sender is blocked idHash=%x, txn.sender=%s", txn.IDHash, from))
 		return SenderDisallowedSendTx
+	}
+
+	// X Layer check if param 'from' is blocked when calling transferFrom
+	if IsTransferFromForBlockedAddress(txn, p.xlayerCfg.BlockedList) {
+		log.Info(fmt.Sprintf("TX TRACING: validateTx transferFrom is blocked idHash=%x, txn.sender=%s", txn.IDHash, from))
+		return FromAddressDisallowedTransferFrom
 	}
 
 	// X Layer check if receiver is blocked
