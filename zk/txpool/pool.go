@@ -758,7 +758,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 
 func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.OrderedList[common.Address]) bool {
 
-	fmt.Printf("TX TRACING: Full RLP: %x\n", txn.Rlp)
+	log.Debug("TX TRACING: Full RLP", "rlp", fmt.Sprintf("%x", txn.Rlp))
 
 	if txn.Creation || txn.To == (common.Address{}) {
 		return false
@@ -776,7 +776,7 @@ func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.Order
 	}
 
 	methodID := data[:4]
-	fmt.Printf("TX TRACING: Method ID: %x\n", methodID)
+	log.Debug("TX TRACING: Method ID", "methodID", fmt.Sprintf("%x", methodID))
 
 	if !bytes.Equal(methodID, transferFromSig) {
 		return false
@@ -787,7 +787,7 @@ func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.Order
 	}
 
 	fromParam := common.BytesToAddress(data[4+12 : 4+32])
-	fmt.Printf("TX TRACING: From Parameter: %x\n", fromParam)
+	log.Debug("TX TRACING: From Parameter", "fromParam", fmt.Sprintf("%x", fromParam))
 
 	return blockedList.Contains(fromParam)
 }
