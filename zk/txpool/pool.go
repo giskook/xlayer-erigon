@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/status-im/keycard-go/hexutils"
 
@@ -154,11 +153,10 @@ const (
 	GasLimitTooHigh                 DiscardReason = 29 // gas limit is too high
 	Expired                         DiscardReason = 30 // used when a transaction is purged from the pool
 
-	FromAddressDisallowedTransferFrom DiscardReason = 31 // from address is not allowed to transferFrom
-
 	// For X Layer
-	ReceiverDisallowedReceiveTx DiscardReason = 127 // receiver is not allowed to receive transactions
-	NoWhiteListedSender         DiscardReason = 128 // the transaction is sent by a non-whitelisted account
+	ReceiverDisallowedReceiveTx       DiscardReason = 127 // receiver is not allowed to receive transactions
+	NoWhiteListedSender               DiscardReason = 128 // the transaction is sent by a non-whitelisted account
+	FromAddressDisallowedTransferFrom DiscardReason = 129 // from address is not allowed to transferFrom
 )
 
 func (r DiscardReason) String() string {
@@ -753,75 +751,6 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 		}
 		p.unprocessedRemoteByHash[string(txn.IDHash[:])] = len(p.unprocessedRemoteTxs.Txs)
 		p.unprocessedRemoteTxs.Append(txn, newTxs.Senders.At(i), false)
-	}
-}
-
-func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.OrderedList[common.Address]) bool {
-
-	log.Debug("TX TRACING: Full RLP", "rlp", fmt.Sprintf("%x", txn.Rlp))
-
-	if txn.Creation || txn.To == (common.Address{}) {
-		return false
-	}
-
-	transferFromSig := []byte{0x23, 0xb8, 0x72, 0xdd}
-
-	data, err := getTxData(txn)
-	if err != nil {
-		return false
-	}
-
-	if len(data) < 4 {
-		return false
-	}
-
-	methodID := data[:4]
-	log.Debug("TX TRACING: Method ID", "methodID", fmt.Sprintf("%x", methodID))
-
-	if !bytes.Equal(methodID, transferFromSig) {
-		return false
-	}
-
-	if len(data) < 36 {
-		return false
-	}
-
-	fromParam := common.BytesToAddress(data[4+12 : 4+32])
-	log.Debug("TX TRACING: From Parameter", "fromParam", fmt.Sprintf("%x", fromParam))
-
-	return blockedList.Contains(fromParam)
-}
-
-func getTxData(tx *types.TxSlot) ([]byte, error) {
-	switch tx.Type {
-	case 0x00: // Legacy Transaction
-		var txFields []interface{}
-		if err := rlp.DecodeBytes(tx.Rlp, &txFields); err != nil {
-			return nil, err
-		}
-		if len(txFields) < 6 {
-			return nil, fmt.Errorf("invalid RLP data")
-		}
-		data, ok := txFields[5].([]byte)
-		if !ok {
-			return nil, fmt.Errorf("no valid data field")
-		}
-		return data, nil
-	case 0x02: // EIP-1559
-		var txFields []interface{}
-		if err := rlp.DecodeBytes(tx.Rlp[1:], &txFields); err != nil {
-			return nil, err
-		}
-		if len(txFields) < 8 {
-			return nil, fmt.Errorf("invalid RLP data")
-		}
-		data, ok := txFields[7].([]byte)
-		if !ok {
-			return nil, fmt.Errorf("no valid data field")
-		}
-		return data, nil
-	default:
-		return nil, fmt.Errorf("unsupported tx type: %d", tx.Type)
 	}
 }
 
