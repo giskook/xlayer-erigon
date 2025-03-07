@@ -312,6 +312,19 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 			if batchState.resequenceBatchJob.AtNewBlockBoundary() {
 				l1TreeUpdateIndex = uint64(batchState.resequenceBatchJob.CurrentBlock().L1InfoTreeIndex)
 			}
+			if infoTreeIndexProgress >= l1TreeUpdateIndex {
+				shouldWriteGerToContract = false
+			}
+			// l1TreeUpdateIndex->GER from datastream and hermezdb are not consistent, so we should instead get l1TreeUpdate with
+			// hermezDb.GetL1InfoTreeUpdateByGer(batchState.resequenceBatchJob.CurrentBlock().GlobalExitRoot),
+			// otherwise any l1info update will cause a mismatch of root during resequencing.
+			if l1TreeUpdateIndex > 0 {
+				infoTreeIndexProgress = l1TreeUpdateIndex
+				l1BlockHash = batchState.resequenceBatchJob.CurrentBlock().L1BlockHash
+				ger = batchState.resequenceBatchJob.CurrentBlock().GlobalExitRoot
+				l1TreeUpdate, _ = sdb.hermezDb.GetL1InfoTreeUpdateByGer(ger)
+			}
+			return
 		}
 		if l1TreeUpdate, err = sdb.hermezDb.GetL1InfoTreeUpdate(l1TreeUpdateIndex); err != nil {
 			return
@@ -336,15 +349,6 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 	}
 
 	return
-}
-
-func prepareTickers(cfg *SequenceBlockCfg) (*time.Ticker, *time.Ticker, *time.Ticker, *time.Ticker) {
-	batchTicker := time.NewTicker(cfg.zk.SequencerBatchSealTime)
-	logTicker := time.NewTicker(10 * time.Second)
-	blockTicker := time.NewTicker(cfg.zk.SequencerBlockSealTime)
-	infoTreeTicker := time.NewTicker(cfg.zk.InfoTreeUpdateInterval)
-
-	return batchTicker, logTicker, blockTicker, infoTreeTicker
 }
 
 // will be called at the start of every new block created within a batch to figure out if there is a new GER
@@ -427,7 +431,7 @@ func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, unwi
 	return nil
 }
 
-func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, streamWriter *SequencerBatchStreamWriter, u stagedsync.Unwinder, latestBlock uint64) (bool, error) {
+func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, streamWriter *SequencerBatchStreamWriter, u stagedsync.Unwinder, latestBlock uint64) (bool, bool, error) {
 	if batchContext.cfg.zk.SequencerHaltOnBatchNumber != 0 && batchContext.cfg.zk.SequencerHaltOnBatchNumber == batchState.batchNumber {
 		log.Info(fmt.Sprintf("[%s] Attempting to halt on batch %v, checking for pending verifications", batchContext.s.LogPrefix(), batchState.batchNumber))
 
@@ -439,7 +443,7 @@ func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, stream
 				time.Sleep(2 * time.Second)
 				needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
 				if needsUnwind || err != nil {
-					return needsUnwind, err
+					return needsUnwind, false, err
 				}
 			} else {
 				log.Info(fmt.Sprintf("[%s] No pending verifications, halting sequencer...", batchContext.s.LogPrefix()))
@@ -449,16 +453,21 @@ func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, stream
 
 		// we need to ensure the batch is also sealed in the datastream at this point
 		if err := finalizeLastBatchInDatastreamIfNotFinalized(batchContext, batchState.batchNumber-1, latestBlock); err != nil {
-			return false, err
+			return false, false, err
 		}
 
+		haltedCount := 0
 		for {
 			log.Info(fmt.Sprintf("[%s] Halt sequencer on batch %d...", batchContext.s.LogPrefix(), batchState.batchNumber))
 			time.Sleep(5 * time.Second) //nolint:gomnd
+			haltedCount++
+			if haltedCount > 3 {
+				return false, true, nil
+			}
 		}
 	}
 
-	return false, nil
+	return false, false, nil
 }
 
 type batchChecker interface {

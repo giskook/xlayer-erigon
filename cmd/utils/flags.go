@@ -415,6 +415,11 @@ var (
 		Usage: "L2 datastreamer endpoint",
 		Value: "",
 	}
+	L2DataStreamerUseTLSFlag = cli.BoolFlag{
+		Name:  "zkevm.l2-datastreamer-use-tls",
+		Usage: "Use TLS connection to L2 datastreamer endpoint",
+		Value: false,
+	}
 	L2DataStreamerTimeout = cli.StringFlag{
 		Name:  "zkevm.l2-datastreamer-timeout",
 		Usage: "The time to wait for data to arrive from the stream before reporting an error (0s doesn't check)",
@@ -586,10 +591,35 @@ var (
 		Usage: "Reuse the L1 info index for resequencing",
 		Value: true,
 	}
+	SequencerReplay = cli.BoolFlag{
+		Name:  "zkevm.sequencer-replay",
+		Usage: "Local replay feature, only works when zkevm.sequencer-resequence enabled",
+		Value: false,
+	}
+	SequencerReplayHaltOnBatchNumber = cli.Uint64Flag{
+		Name:  "zkevm.sequencer-replay-halt-on-batch-number",
+		Usage: "Halt the sequencer on this batch number when replaying",
+		Value: 0,
+	}
+	SequencerReplayExternalDatastream = cli.BoolFlag{
+		Name:  "zkevm.sequencer-replay-external-datastream",
+		Usage: "When enabled, the sequencer will create a new data stream server connected to an external datastream file and read batches from it",
+		Value: false,
+	}
+	SequencerReplayL1SyncOnly = cli.BoolFlag{
+		Name:  "zkevm.sequencer-replay-l1-sync-only",
+		Usage: "When enabled, the sequencer will only sync the L1 info and exit",
+		Value: false,
+	}
 	ExecutorUrls = cli.StringFlag{
 		Name:  "zkevm.executor-urls",
 		Usage: "A comma separated list of grpc addresses that host executors",
 		Value: "",
+	}
+	ExecutorEnabled = cli.BoolFlag{
+		Name:  "zkevm.executor-enabled",
+		Usage: "Enables the executor. Used for testing limbo, when executor-urls are set, but we don't want to use them, only in limbo to verify limbo transactions. For this case, set it to false. Defaulted to true",
+		Value: true,
 	}
 	ExecutorStrictMode = cli.BoolFlag{
 		Name:  "zkevm.executor-strict",
@@ -612,6 +642,12 @@ var (
 		Usage: "A size of the memdb used on witness generation in format \"2GB\". Might fail generation for older batches if not enough for the unwind.",
 		Value: datasizeFlagValue(2 * datasize.GB),
 	}
+	WitnessUnwindLimit = cli.Uint64Flag{
+		Name:  "zkevm.witness-unwind-limit",
+		Usage: "The maximum number of blocks the witness generation can unwind",
+		Value: 500_000,
+	}
+
 	ExecutorMaxConcurrentRequests = cli.IntFlag{
 		Name:  "zkevm.executor-max-concurrent-requests",
 		Usage: "The maximum number of concurrent requests to the executor",
@@ -667,6 +703,16 @@ var (
 		Usage: "Allow the sequencer to proceed transactions with 0 gas price",
 		Value: false,
 	}
+	RejectLowGasPriceTransactions = cli.BoolFlag{
+		Name:  "zkevm.reject-low-gas-price-transactions",
+		Usage: "Reject the sequencer to proceed transactions with low gas price",
+		Value: false,
+	}
+	RejectLowGasPriceTolerance = cli.Float64Flag{
+		Name:  "zkevm.reject-low-gas-price-tolerance",
+		Usage: "Value between 0 and 1 that defines the tolerance for low gas price transactions, this percentage will be removed from the lowest price to determine rejection",
+		Value: 0,
+	}
 	AllowPreEIP155Transactions = cli.BoolFlag{
 		Name:  "zkevm.allow-pre-eip155-transactions",
 		Usage: "Allow the sequencer to proceed pre-EIP155 transactions",
@@ -706,6 +752,16 @@ var (
 	GasPriceFactor = cli.Float64Flag{
 		Name:  "zkevm.gas-price-factor",
 		Usage: "Apply factor to L1 gas price to calculate l2 gasPrice",
+		Value: 1,
+	}
+	GasPriceCheckFrequency = cli.DurationFlag{
+		Name:  "zkevm.gas-price-check-frequency",
+		Usage: "The frequency at which to check the L1 for the latest gas price",
+		Value: 0,
+	}
+	GasPriceHistoryCount = cli.Uint64Flag{
+		Name:  "zkevm.gas-price-history-count",
+		Usage: "The number of historical gas prices to keep",
 		Value: 1,
 	}
 	WitnessFullFlag = cli.BoolFlag{
@@ -778,15 +834,30 @@ var (
 		Usage: "Enable witness cache",
 		Value: false,
 	}
-	WitnessCacheLimit = cli.UintFlag{
-		Name:  "zkevm.witness-cache-limit",
-		Usage: "Amount of blocks behind the last executed one to keep witnesses for. Needs a lot of HDD space. Default value 10 000.",
-		Value: 10000,
+	WitnessCachePurge = cli.BoolFlag{
+		Name:  "zkevm.witness-cache-purge",
+		Usage: "Purge the witness cache on startup. Default false.",
+		Value: false,
+	}
+	WitnessCacheBatchAheadOffset = cli.UintFlag{
+		Name:  "zkevm.witness-cache-batch-ahead-offset",
+		Usage: "How many batches ahead of the highest verified batch to cache. Default 0.",
+		Value: 0,
+	}
+	WitnessCacheBatchBehindOffset = cli.UintFlag{
+		Name:  "zkevm.witness-cache-batch-behind-offset",
+		Usage: "How many batches behind the highest verified batch to cache. Default 5.",
+		Value: 5,
 	}
 	WitnessContractInclusion = cli.StringFlag{
 		Name:  "zkevm.witness-contract-inclusion",
 		Usage: "Contracts that will have all of their storage added to the witness every time",
 		Value: "",
+	}
+	BadTxAllowance = cli.Uint64Flag{
+		Name:  "zkevm.bad-tx-allowance",
+		Usage: "The maximum number of times a transaction that consumes too many counters to fit into a batch will be attempted before it is rejected outright by eth_sendRawTransaction",
+		Value: 2,
 	}
 	ACLPrintHistory = cli.IntFlag{
 		Name:  "acl.print-history",
@@ -834,6 +905,11 @@ var (
 		Name:  "rpc.returndata.limit",
 		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
 		Value: 100_000,
+	}
+	RpcLogsMaxRange = cli.Uint64Flag{
+		Name:  "rpc.logs.maxrange",
+		Usage: "Maximum range of logs that can be requested in a single call",
+		Value: 1000,
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
@@ -1945,7 +2021,7 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 
 	// For X Layer
 	setTxPoolXLayer(ctx, cfg)
-	
+
 	purgeEvery := ctx.Duration(TxpoolPurgeEveryFlag.Name)
 	purgeDistance := ctx.Duration(TxpoolPurgeDistanceFlag.Name)
 
@@ -2376,6 +2452,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
 		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
+	} else {
+		cfg.DisableTxPoolGossip = txpoolcfg.DefaultConfig.NoGossip
 	}
 }
 

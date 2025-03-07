@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
@@ -17,7 +16,6 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/zk/utils"
-	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -45,8 +43,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
 	var toDel []*metaTx // can't delete items while iterate them
-	// For X Layer
-	isfreeGasAddr, claim := p.checkFreeGasAddrXLayer(senderID)
 	byNonce.ascend(senderID, func(mt *metaTx) bool {
 		if mt.Tx.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.Nonce, mt.currentSubPool))
@@ -69,28 +65,6 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			toDel = append(toDel, mt)
 			return true
 		}
-		// For X Layer
-		// parse claim tx or dex tx, and add the withdraw addr into free gas cache
-		if p.xlayerCfg.EnableFreeGasByNonce {
-			if p.checkFreeGasExAddrXLayer(senderID) {
-				inputHex := hex.EncodeToHex(mt.Tx.Rlp)
-				if strings.HasPrefix(inputHex, "0xa9059cbb") && len(inputHex) > 74 {
-					addrHex := "0x" + inputHex[10:74]
-					p.freeGasAddrs[addrHex] = true
-				} else {
-					p.freeGasAddrs[mt.Tx.To.Hex()] = true
-				}
-			} else if claim && mt.Tx.Nonce < p.xlayerCfg.FreeGasCountPerAddr {
-				inputHex := hex.EncodeToHex(mt.Tx.Rlp)
-				if len(inputHex) > 4554 {
-					addrHex := "0x" + inputHex[4490:4554]
-					p.freeGasAddrs[addrHex] = true
-				} else {
-					p.freeGasAddrs[mt.Tx.To.Hex()] = true
-				}
-			}
-		}
-
 		if minFeeCap.Gt(&mt.Tx.FeeCap) {
 			*minFeeCap = mt.Tx.FeeCap
 		}
@@ -101,9 +75,15 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		mt.minTip = minTip
 
 		// For X Layer
-		// free case: 1. is claim tx; 2. new bridge account with the first few tx
-		if claim ||
-			(p.xlayerCfg.EnableFreeGasByNonce && isfreeGasAddr && mt.Tx.Nonce < p.xlayerCfg.FreeGasCountPerAddr) {
+		// free type:
+		// 0. not free
+		// 1. is claim tx;
+		// 2. new bridge account with the first few tx
+		// 3. special project
+		freeType, gpMul := p.checkFreeGasAddrXLayer(senderID, mt.Tx)
+		// parse claim tx or dex tx, and add the withdraw addr into free gas cache
+		p.setFreeGasByNonceCache(senderID, mt, freeType == claim)
+		if freeType > notFree {
 			// get dynamic gp
 			// here for the case when restart gpCache has not init
 			// use the max uint64 as default because the remain claimTx should handle first
@@ -111,12 +91,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			if p.gpCache != nil {
 				_, dGp := p.gpCache.GetLatest()
 				if dGp != nil {
-					newGpBig.Set(dGp)
-					if claim {
-						newGpBig = newGpBig.Mul(newGpBig, big.NewInt(int64(p.xlayerCfg.GasPriceMultiple)))
-						//log.Debug(fmt.Sprintf("Free tx: type claim. dGp:%v, factor:%d, newGp:%d", dGp, p.xlayerCfg.GasPriceMultiple, newGpBig))
-					}
+					newGpBig = newGpBig.Mul(dGp, big.NewInt(int64(gpMul)))
 				}
+				//log.Debug(fmt.Sprintf("Free tx: nonce:%d, type %d. dGp:%v, factor:%d, newGp:%d", mt.Tx.Nonce, freeType, dGp, gpMul, newGpBig))
 			}
 
 			mt.minTip = newGpBig.Uint64()
@@ -243,7 +220,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			// remove ldn txs when not in london
 			toRemove = append(toRemove, mt)
 			toSkip.Add(mt.Tx.IDHash)
-			//log.Trace("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
+			//log.Info("Removing London transaction in non-London environment", "txID", mt.Tx.IDHash)
 			continue
 		}
 
@@ -260,7 +237,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		}
 		if len(rlpTx) == 0 {
 			toRemove = append(toRemove, mt)
-			//log.Trace("Removing transaction with empty RLP", "txID", mt.Tx.IDHash)
+			//log.Info("Removing transaction with empty RLP", "txID", common.BytesToHash(mt.Tx.IDHash[:]))
 			continue
 		}
 
@@ -299,7 +276,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
 			p.pending.Remove(mt)
-			//log.Trace("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
+			p.discardLocked(mt, UnsupportedTx)
+			//log.Debug("Removed transaction from pending pool", "txID", mt.Tx.IDHash)
 		}
 	}
 	return true, count, nil
@@ -380,13 +358,49 @@ func (p *TxPool) RemoveMinedTransactions(ctx context.Context, tx kv.Tx, blockGas
 	return nil
 }
 
+func (p *TxPool) TriggerSenderStateChanges(ctx context.Context, tx kv.Tx, blockGasLimit uint64, senders map[common.Address]struct{}) error {
+	if len(senders) == 0 {
+		return nil
+	}
+
+	cache := p.cache()
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	sendersToUpdate := make(map[uint64]struct{})
+	for sender := range senders {
+		if id, ok := p.senders.senderIDs[sender]; ok {
+			sendersToUpdate[id] = struct{}{}
+		}
+	}
+
+	baseFee := p.pendingBaseFee.Load()
+
+	cacheView, err := cache.View(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	for senderID := range sendersToUpdate {
+		nonce, balance, err := p.senders.info(cacheView, senderID)
+		if err != nil {
+			return err
+		}
+		p.onSenderStateChange(senderID, nonce, balance, p.all,
+			baseFee, blockGasLimit, p.pending, p.baseFee, p.queued, p.discardLocked)
+	}
+
+	return nil
+}
+
 // discards the transactions that are in overflowZkCoutners from pending
 // executes the discard function on them
 // deletes the tx from the sendersWithChangedState map
 // deletes the discarded txs from the overflowZkCounters
 func (p *TxPool) discardOverflowZkCountersFromPending(pending *PendingPool, discard func(*metaTx, DiscardReason), sendersWithChangedState map[uint64]struct{}) {
 	for _, mt := range p.overflowZkCounters {
-		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", mt.Tx.IDHash)
+		log.Info("[tx_pool] Removing TX from pending due to counter overflow", "tx", common.BytesToHash(mt.Tx.IDHash[:]))
 		pending.Remove(mt)
 		discard(mt, OverflowZkCounters)
 		sendersWithChangedState[mt.Tx.SenderID] = struct{}{}
@@ -421,4 +435,16 @@ func markAsLocal(txSlots *types2.TxSlots) {
 	for i := range txSlots.IsLocal {
 		txSlots.IsLocal[i] = true
 	}
+}
+
+// PreYield is a function that is called before the yield function is called.  Because the yield function is called from outside
+// the txpool and relies on using the txpool db to create a View there is a potential race between the flush function running
+// and the yield function starting which can result in it appearing that a transaction has no RLP because the flush has not yet
+// finished
+func (p *TxPool) PreYield() {
+	p.flushMtx.Lock()
+}
+
+func (p *TxPool) PostYield() {
+	p.flushMtx.Unlock()
 }

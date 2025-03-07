@@ -83,6 +83,12 @@ func NewCountersFromUsedArray(used []int) *Counters {
 	return &res
 }
 
+func (c Counters) NullateUsed() {
+	for _, v := range c {
+		v.used = 0
+	}
+}
+
 func (c Counters) UsedAsString() string {
 	res := fmt.Sprintf("[%s: %v]", CounterKeyNames[SHA], c[SHA].used)
 	res += fmt.Sprintf("[%s: %v]", CounterKeyNames[A], c[A].used)
@@ -116,6 +122,35 @@ func (c Counters) UsedAsMap() map[string]int {
 		string(CounterKeyNames[P]):   c[P].used,
 		string(CounterKeyNames[SHA]): c[SHA].used,
 	}
+}
+
+func (c Counters) OverflownAsString() string {
+	var res string
+	if c[SHA].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[SHA], c[SHA].remaining)
+	}
+	if c[A].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[A], c[A].remaining)
+	}
+	if c[B].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[B], c[B].remaining)
+	}
+	if c[K].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[K], c[K].remaining)
+	}
+	if c[M].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[M], c[M].remaining)
+	}
+	if c[P].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[P], c[P].remaining)
+	}
+	if c[S].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[S], c[S].remaining)
+	}
+	if c[D].remaining < 0 {
+		res += fmt.Sprintf("[%s: %v]", CounterKeyNames[D], c[D].remaining)
+	}
+	return res
 }
 
 func (c *Counters) GetArithmetics() *Counter {

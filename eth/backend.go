@@ -151,7 +151,8 @@ var dataStreamServerFactory = server.NewZkEVMDataStreamServerFactory()
 type Config = ethconfig.Config
 
 type PreStartTasks struct {
-	WarmUpDataStream bool
+	WarmUpDataStream  bool
+	PurgeWitnessCache bool
 }
 
 // Ethereum implements the Ethereum full node service.
@@ -238,6 +239,7 @@ type Ethereum struct {
 
 	polygonSyncService polygonsync.Service
 	stopNode           func() error
+	gasTracker         *jsonrpc.RecurringL1GasPriceTracker
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -971,6 +973,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if backend.config.Zk != nil {
+		// setup the gas tracker and start it
+		backend.gasTracker = jsonrpc.NewRecurringL1GasPriceTracker(
+			backend.config.AllowFreeTransactions,
+			backend.config.GasPriceFactor,
+			backend.config.DefaultGasPrice,
+			backend.config.MaxGasPrice,
+			backend.config.L1RpcUrl,
+			backend.config.GasPriceCheckFrequency,
+			backend.config.GasPriceHistoryCount,
+		)
+
 		// zkevm: create a data stream server if we have the appropriate config for one.  This will be started on the call to Init
 		// alongside the http server
 		httpCfg := stack.Config().Http
@@ -997,6 +1010,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.preStartTasks.WarmUpDataStream = true
 			}
 		}
+
+		backend.preStartTasks.PurgeWitnessCache = config.WitnessCachePurge
 
 		// entering ZK territory!
 		cfg := backend.config
@@ -1126,6 +1141,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				backend.config.Zk,
 				backend.engine,
 				backend.config.WitnessContractInclusion,
+				backend.config.WitnessUnwindLimit,
 			)
 
 			var legacyExecutors []*legacy_executor_verifier.Executor = make([]*legacy_executor_verifier.Executor, 0, len(cfg.ExecutorUrls))
@@ -1296,7 +1312,7 @@ func newEtherMan(cfg *ethconfig.Config, l2ChainName, url string) *etherman.Clien
 
 // creates a datastream client with default parameters
 func initDataStreamClient(ctx context.Context, cfg *ethconfig.Zk, latestForkId uint16) *client.StreamClient {
-	return client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout, latestForkId)
+	return client.NewClient(ctx, cfg.L2DataStreamerUrl, cfg.L2DataStreamerUseTLS, cfg.DatastreamVersion, cfg.L2DataStreamerTimeout, latestForkId)
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
@@ -1349,8 +1365,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if s.streamServer != nil {
 		dataStreamServer = dataStreamServerFactory.CreateDataStreamServer(s.streamServer, config.Zk.L2ChainId)
 	}
+
 	var gpCache *jsonrpc.GasPriceCache
-	s.apiList, gpCache = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, s.txPool2, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, config, s.l1Syncer, s.logger, dataStreamServer)
+	s.apiList, gpCache = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, s.txPool2, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, config, s.l1Syncer, s.logger, dataStreamServer, s.gasTracker)
 
 	// For X Layer
 	if s.txPool2 != nil && gpCache != nil {
@@ -1389,7 +1406,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	if chainConfig.Bor == nil {
-		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient, s.gasTracker)
 	}
 
 	go func() {
@@ -1435,6 +1452,22 @@ func (s *Ethereum) PreStart() error {
 		}
 		if err = tx.Commit(); err != nil {
 			return err
+		}
+	}
+
+	if s.preStartTasks.PurgeWitnessCache {
+		log.Warn("[PreStart] purge witness cache enabled, purging...", "zkevm.witness-cache-purge", s.config.WitnessCachePurge)
+		tx, err := s.chainDB.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		hermezDb := hermez_db.NewHermezDb(tx)
+		if err := hermezDb.PurgeWitnessCaches(); err != nil {
+			return fmt.Errorf("failed to purge witness caches: %w", err)
+		}
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("tx.Commit: %w", err)
 		}
 	}
 
@@ -1916,6 +1949,8 @@ func (s *Ethereum) Start() error {
 		s.engine.(*bor.Bor).Start(s.chainDB)
 	}
 
+	s.gasTracker.Start()
+
 	// if s.silkwormRPCDaemonService != nil {
 	// 	if err := s.silkwormRPCDaemonService.Start(); err != nil {
 	// 		s.logger.Error("silkworm.StartRpcDaemon error", "err", err)
@@ -1933,6 +1968,16 @@ func (s *Ethereum) Start() error {
 // Stop implements node.Service, terminating all internal goroutines used by the
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
+	// For X Layer, local replay's feature of resuming from breakpoint
+	// Wait for the batch resequence done
+	if s.config.Zk.XLayer.SequencerReplay && s.config.Zk.XLayer.SequencerReplayExternalDatastream {
+		if done, running := zkStages.WaitResequenceBatchDone(); running {
+			s.logger.Info("Waiting for resequencing latest batch...")
+			<-done
+			s.logger.Info("Resequence latest batch finished")
+		}
+	}
+
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
 	if s.unsubscribeEthstat != nil {
@@ -1971,6 +2016,8 @@ func (s *Ethereum) Stop() error {
 		s.agg.Close()
 	}
 	s.chainDB.Close()
+
+	s.gasTracker.Stop()
 
 	if s.silkwormRPCDaemonService != nil {
 		if err := s.silkwormRPCDaemonService.Stop(); err != nil {

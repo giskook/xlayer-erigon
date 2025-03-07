@@ -46,23 +46,36 @@ type DeprecatedTxPoolConfig struct {
 
 	// X Layer config
 	// BlockedList is the blocked address list
-	BlockedList []string
+	BlockedList common.OrderedList[common.Address]
 	// EnableWhitelist is a flag to enable/disable the whitelist
 	EnableWhitelist bool
 	// WhiteList is the white address list
-	WhiteList []string
+	WhiteList common.OrderedList[common.Address]
 	// FreeClaimGasAddrs is the address list for claim
-	FreeClaimGasAddrs []string
+	FreeClaimGasAddrs common.OrderedList[common.Address]
 	// GasPriceMultiple is the factor claim tx gas price should mul
 	GasPriceMultiple uint64
 	// EnableFreeGasByNonce enable free gas
 	EnableFreeGasByNonce bool
 	// FreeGasExAddrs is the ex address which can be free gas for the transfer receiver
-	FreeGasExAddrs []string
+	FreeGasExAddrs common.OrderedList[common.Address]
 	// FreeGasCountPerAddr is the count limit of free gas tx per address
 	FreeGasCountPerAddr uint64
 	// FreeGasLimit is the max gas allowed use to do a free gas tx
 	FreeGasLimit uint64
+	// EnableFreeGasList enable the special project of XLayer for free gas
+	EnableFreeGasList bool
+	// FreeGasList project name to FreeGasInfo
+	FreeGasList []FreeGasInfo
+}
+
+// FreeGasInfo contains the details for what tx should be free
+type FreeGasInfo struct {
+	Name             string   `json:"name"`
+	FromList         []string `json:"from_list"`
+	ToList           []string `json:"to_list"`
+	MethodSigs       []string `json:"method_sigs"`
+	GasPriceMultiple uint64   `json:"gas_price_multiple"`
 }
 
 // DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
@@ -80,15 +93,16 @@ var DeprecatedDefaultTxPoolConfig = DeprecatedTxPoolConfig{
 	Lifetime: 3 * time.Hour,
 
 	// X Layer config
-	BlockedList:          []string{},
+	BlockedList:          *common.NewOrderedListOfAddresses(1024),
 	EnableWhitelist:      false,
-	WhiteList:            []string{},
-	FreeClaimGasAddrs:    []string{},
+	WhiteList:            *common.NewOrderedListOfAddresses(1024),
+	FreeClaimGasAddrs:    *common.NewOrderedListOfAddresses(1024),
 	GasPriceMultiple:     2,
 	EnableFreeGasByNonce: false,
-	FreeGasExAddrs:       []string{},
+	FreeGasExAddrs:       *common.NewOrderedListOfAddresses(1024),
 	FreeGasCountPerAddr:  3,
 	FreeGasLimit:         21000,
+	EnableFreeGasList:    false,
 }
 
 var DefaultTxPool2Config = func(fullCfg *Config) txpoolcfg.Config {

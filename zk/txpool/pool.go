@@ -380,7 +380,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
-	return &TxPool{
+	tp := &TxPool{
 		lock:                    &sync.Mutex{},
 		byHash:                  map[string]*metaTx{},
 		isLocalLRU:              localsHistory,
@@ -415,15 +415,16 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 			FreeGasExAddrs:       ethCfg.DeprecatedTxPool.FreeGasExAddrs,
 			FreeGasCountPerAddr:  ethCfg.DeprecatedTxPool.FreeGasCountPerAddr,
 			FreeGasLimit:         ethCfg.DeprecatedTxPool.FreeGasLimit,
-		},
+			EnableFreeGasList:    ethCfg.DeprecatedTxPool.EnableFreeGasList},
 		freeGasAddrs: map[string]bool{},
-	}, nil
+	}
+	tp.setFreeGasList(ethCfg.DeprecatedTxPool.FreeGasList)
+
+	return tp, nil
 }
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 	defer newBlockTimer.UpdateDuration(time.Now())
-
-	isAfterLimbo := len(unwindTxs.Txs) > 0 && p.isDeniedYieldingTransactions()
 
 	cache := p.cache()
 	cache.OnNewBlock(stateChanges)
@@ -552,7 +553,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		log.Info("[txpool] Discarding", "tx-hash", hexutils.BytesToHex(slot.IDHash[:]))
 	}
 	p.finalizeLimboOnNewBlock(limboTxs)
-	if isAfterLimbo {
+	if p.isDeniedYieldingTransactions() {
 		p.allowYieldingTransactions()
 	}
 
@@ -740,7 +741,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView, from common.Address) DiscardReason {
 	isShanghai := p.isShanghai()
 	if isShanghai {
-		if txn.DataLen > fixedgas.MaxInitCodeSize {
+		if txn.Creation && txn.DataLen > fixedgas.MaxInitCodeSize {
 			return InitCodeTooLarge
 		}
 	}
@@ -762,7 +763,8 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	if p.gpCache != nil {
 		rgp = p.gpCache.GetLatestRawGP()
 	}
-	if !p.isFreeGasXLayer(txn.SenderID) && uint256.NewInt(rgp.Uint64()).Cmp(&txn.FeeCap) == 1 {
+	if !p.isFreeGasXLayer(txn.SenderID, txn) &&
+		uint256.NewInt(rgp.Uint64()).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
 			log.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IDHash, isLocal, txn.FeeCap, p.cfg.MinFeeCap))
 		}
@@ -1315,14 +1317,6 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 	return p.all.nonce(senderID)
 }
 
-func (p *TxPool) LockFlusher() {
-	p.flushMtx.Lock()
-}
-
-func (p *TxPool) UnlockFlusher() {
-	p.flushMtx.Unlock()
-}
-
 // removeMined - apply new highest block (or batch of blocks)
 //
 // 1. New best block arrives, which potentially changes the balance and the nonce of some senders.
@@ -1463,16 +1457,16 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	for {
 		select {
 		case <-ctx.Done():
-			p.LockFlusher()
 			innerContext, innerContextcancel := context.WithCancel(context.Background())
+			p.flushMtx.Lock()
 			written, err := p.flush(innerContext, db)
+			p.flushMtx.Unlock()
 			if err != nil {
 				log.Error("[txpool] flush is local history", "err", err)
 			} else {
 				writeToDBBytesCounter.Set(written)
 			}
 			innerContextcancel()
-			p.UnlockFlusher()
 			return
 		case <-logEvery.C:
 			p.logStats()
@@ -1492,9 +1486,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 		case <-commitEvery.C:
 			if db != nil && p.Started() {
 				t := time.Now()
-				p.LockFlusher()
+				p.flushMtx.Lock()
 				written, err := p.flush(ctx, db)
-				p.UnlockFlusher()
+				p.flushMtx.Unlock()
 				if err != nil {
 					log.Error("[txpool] flush is local history", "err", err)
 					continue
@@ -1521,6 +1515,14 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				announcements = announcements.DedupCopy()
 
 				notifyMiningAboutNewSlots()
+
+				if p.cfg.NoGossip {
+					// drain newTxs for emptying newTx channel
+					// newTx channel will be filled only with local transactions
+					// early return to avoid outbound transaction propagation
+					log.Debug("[txpool] tx gossip disabled", "state", "drain new transactions")
+					return
+				}
 
 				var localTxTypes []byte
 				var localTxSizes []uint32
@@ -1595,9 +1597,10 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 }
 
 func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err error) {
-	defer writeToDBTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	defer writeToDBTimer.UpdateDuration(time.Now())
 	//it's important that write db tx is done inside lock, to make last writes visible for all read operations
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
@@ -2264,6 +2267,7 @@ type PendingPool struct {
 }
 
 func NewPendingSubPool(t SubPoolType, limit int) *PendingPool {
+	log.Info("new sub pool", "SubPoolType", PendingSubPool, "limit", limit)
 	return &PendingPool{limit: limit, t: t, best: &bestSlice{ms: []*metaTx{}}, worst: &WorstQueue{ms: []*metaTx{}}}
 }
 
@@ -2366,6 +2370,7 @@ type SubPool struct {
 }
 
 func NewSubPool(t SubPoolType, limit int) *SubPool {
+	log.Info("new sub pool", "SubPoolType", t, "limit", limit)
 	return &SubPool{limit: limit, t: t, best: &BestQueue{}, worst: &WorstQueue{}}
 }
 
