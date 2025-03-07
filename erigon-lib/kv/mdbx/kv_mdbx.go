@@ -785,9 +785,11 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 }
 
 func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return db.beginRw(ctx, 0)
+	//log.Info("zjg, BeginRw by nosync")
+	return db.beginRw(ctx, mdbx.TxNoSync)
 }
 func (db *MdbxKV) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+	log.Info("zjg, BeginRwNosync")
 	return db.beginRw(ctx, mdbx.TxNoSync)
 }
 
