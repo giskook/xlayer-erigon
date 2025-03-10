@@ -15,7 +15,6 @@ import (
 
 // IsTransferFromForBlockedAddress checks if a transaction is a transferFrom call with a blocked address as the from parameter
 func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.OrderedList[common.Address]) bool {
-	log.Debug("TX TRACING: Full RLP", "rlp", fmt.Sprintf("%x", txn.Rlp))
 
 	if txn.Creation || txn.To == (common.Address{}) {
 		return false
@@ -33,7 +32,6 @@ func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.Order
 	}
 
 	methodID := data[:4]
-	log.Debug("TX TRACING: Method ID", "methodID", fmt.Sprintf("%x", methodID))
 
 	if !bytes.Equal(methodID, transferFromSig) {
 		return false
@@ -44,7 +42,6 @@ func IsTransferFromForBlockedAddress(txn *types.TxSlot, blockedList common.Order
 	}
 
 	fromParam := common.BytesToAddress(data[4+12 : 4+32])
-	log.Debug("TX TRACING: From Parameter", "fromParam", fmt.Sprintf("%x", fromParam))
 
 	return blockedList.Contains(fromParam)
 }
