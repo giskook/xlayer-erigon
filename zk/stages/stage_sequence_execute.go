@@ -742,12 +742,15 @@ func sequencingBatchStep(
 		}
 
 		quit := batchContext.ctx.Done()
-		batchContext.sdb.eridb.OpenBatchWithCachedValue(quit, s.GetSmtCache())
+		batchContext.sdb.eridb.OpenBatchWithSmtCache(quit, s.GetSmtCache())
 		if block, err = doFinishBlockAndUpdateState(batchContext, ibs, header, parentBlock, batchState, ger, l1BlockHash, l1TreeUpdateIndex, infoTreeIndexProgress, batchCounters); err != nil {
 			batchContext.sdb.eridb.RollbackBatch()
 			return err
 		}
-		smtCache, deltaCache := batchContext.sdb.eridb.RetrieveAndCleanBatchCache()
+		smtCache, deltaCache := batchContext.sdb.eridb.RetrieveAndCleanSmtBatchCache()
+		if err := batchContext.sdb.eridb.CommitBatch(); err != nil {
+			return err
+		}
 		s.SetSmtCache(smtCache, deltaCache)
 
 		// For X Layer
