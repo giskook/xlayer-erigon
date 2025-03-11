@@ -11,7 +11,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50061:50061 # MT
-      - 0.0.0.0:50041:50071 # Executor
+      - 0.0.0.0:50021:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -25,7 +25,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50062:50061 # MT
-      - 0.0.0.0:50042:50071 # Executor
+      - 0.0.0.0:50022:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -39,7 +39,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50063:50061 # MT
-      - 0.0.0.0:50043:50071 # Executor
+      - 0.0.0.0:50023:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -53,7 +53,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50064:50061 # MT
-      - 0.0.0.0:50044:50071 # Executor
+      - 0.0.0.0:50024:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -67,7 +67,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50065:50061 # MT
-      - 0.0.0.0:50045:50071 # Executor
+      - 0.0.0.0:50025:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -81,7 +81,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50066:50061 # MT
-      - 0.0.0.0:50046:50071 # Executor
+      - 0.0.0.0:50026:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -95,7 +95,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50067:50061 # MT
-      - 0.0.0.0:50047:50071 # Executor
+      - 0.0.0.0:50027:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -109,7 +109,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50068:50061 # MT
-      - 0.0.0.0:50048:50071 # Executor
+      - 0.0.0.0:50028:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -123,7 +123,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50069:50061 # MT
-      - 0.0.0.0:50049:50071 # Executor
+      - 0.0.0.0:50029:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -137,7 +137,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50070:50061 # MT
-      - 0.0.0.0:50050:50071 # Executor
+      - 0.0.0.0:50030:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -151,7 +151,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50071:50061 # MT
-      - 0.0.0.0:50051:50071 # Executor
+      - 0.0.0.0:50031:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -165,7 +165,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50072:50061 # MT
-      - 0.0.0.0:50052:50071 # Executor
+      - 0.0.0.0:50032:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -179,7 +179,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50073:50061 # MT
-      - 0.0.0.0:50053:50071 # Executor
+      - 0.0.0.0:50033:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -193,7 +193,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50074:50061 # MT
-      - 0.0.0.0:50054:50071 # Executor
+      - 0.0.0.0:50034:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -207,7 +207,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50075:50061 # MT
-      - 0.0.0.0:50055:50071 # Executor
+      - 0.0.0.0:50035:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -221,7 +221,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50076:50061 # MT
-      - 0.0.0.0:50056:50071 # Executor
+      - 0.0.0.0:50036:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -235,7 +235,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50077:50061 # MT
-      - 0.0.0.0:50057:50071 # Executor
+      - 0.0.0.0:50037:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -249,7 +249,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50078:50061 # MT
-      - 0.0.0.0:50058:50071 # Executor
+      - 0.0.0.0:50038:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -263,7 +263,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50079:50061 # MT
-      - 0.0.0.0:50059:50071 # Executor
+      - 0.0.0.0:50039:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
@@ -277,7 +277,7 @@ services:
       - EXPERIMENTAL_DOCKER_DESKTOP_FORCE_QEMU=1
     ports:
       - 0.0.0.0:50080:50061 # MT
-      - 0.0.0.0:50060:50071 # Executor
+      - 0.0.0.0:50040:50071 # Executor
     volumes:
       - ./config/test.stateless_executor.config.json:/usr/src/app/config.json
     command: >
