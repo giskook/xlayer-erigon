@@ -42,12 +42,10 @@ func BuildBlockInfoTree(
 		return nil, err
 	}
 
-	// use buffered channels to avoid goroutine leaks
 	type result struct {
 		keys   []*utils.NodeKey
 		vals   []*utils.NodeValue8
 		logCnt int64
-		err    error
 		index  int
 	}
 
@@ -89,7 +87,6 @@ func BuildBlockInfoTree(
 					return
 				}
 
-				// generate tx keys and vals
 				genKeys, genVals, err := infoTree.GenerateBlockTxKeysVals(
 					&l2TxHash,
 					idx,
