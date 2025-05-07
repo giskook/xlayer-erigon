@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	cMocks "github.com/ledgerwatch/erigon-lib/kv/kvcache/mocks"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
@@ -37,7 +38,10 @@ import (
 
 func TestSpawnSequencingStage(t *testing.T) {
 	// Arrange
-	ctx, db1, txPoolDb := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db1, dbsmt, txPoolDb := memdb.NewTestDB(t), memdb.NewTestDB(t), memdb.NewTestDB(t)
 	tx := memdb.BeginRw(t, db1)
 	err := hermez_db.CreateHermezBuckets(tx)
 	require.NoError(t, err)
@@ -143,13 +147,14 @@ func TestSpawnSequencingStage(t *testing.T) {
 		AnyTimes()
 
 	zkCfg := &ethconfig.Zk{
-		SequencerResequence:    false,
-		SequencerBatchSealTime: 3 * time.Millisecond, // normally it is greater that block seal time, allows one more block to be added to the batch
+		SequencerResequence: false,
+		// lower batch close time ensures only 1 block will be created on 1 turn, as the test expects
+		SequencerBatchSealTime: 2 * time.Millisecond, // normally it is greater that block seal time, allows one more block to be added to the batch
 		SequencerBlockSealTime: 2 * time.Millisecond,
 		InfoTreeUpdateInterval: 2 * time.Millisecond,
 	}
 
-	legacyVerifier := verifier.NewLegacyExecutorVerifier(*zkCfg, nil, db1, nil, nil)
+	legacyVerifier := verifier.NewLegacyExecutorVerifier(*zkCfg, nil, db1, dbsmt, nil, nil)
 
 	cfg := SequenceBlockCfg{
 		dataStreamServer: dataStreamServerMock,
@@ -161,6 +166,7 @@ func TestSpawnSequencingStage(t *testing.T) {
 		txPoolDb:         txPoolDb,
 		engine:           engineMock,
 		legacyVerifier:   legacyVerifier,
+		doneHook:         &MockDoneHook{},
 	}
 	historyCfg := stagedsync.StageHistoryCfg(db1, prune.DefaultMode, "")
 	quiet := true
@@ -198,4 +204,11 @@ func TestSpawnSequencingStage(t *testing.T) {
 	assert.True(t, expectedBlockNum <= blockNumber && blockNumber <= expectedBlockNum+1, "value is not in range")
 	assert.Equal(t, uint64(1), stateVersion)
 	tx.Rollback()
+}
+
+type MockDoneHook struct {
+}
+
+func (m *MockDoneHook) AfterRun(tx kv.Tx, finishProgressBefore uint64, prevUnwindPoint *uint64) error {
+	return nil
 }

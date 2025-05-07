@@ -16,9 +16,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
+	"github.com/ledgerwatch/erigon/zk/smt"
 	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -111,7 +113,7 @@ func (vb *VerifierBundle) isInternalError() bool {
 }
 
 type WitnessGenerator interface {
-	GetWitnessByBlockRange(tx kv.Tx, ctx context.Context, startBlock, endBlock uint64, debug, witnessFull bool) ([]byte, error)
+	GetWitnessByBlockRange(tx kv.Tx, txsmt kv.Tx, ctx context.Context, startBlock, endBlock uint64, debug, witnessFull bool, cache map[string]map[string][]byte) ([]byte, error)
 }
 
 type LegacyExecutorVerifier struct {
@@ -126,12 +128,17 @@ type LegacyExecutorVerifier struct {
 
 	promises    []*Promise[*VerifierBundle]
 	mtxPromises *sync.Mutex
+
+	// For X Layer, split db and ac
+	dbsmt kv.RwDB
+	cache *smt.SmtCache
 }
 
 func NewLegacyExecutorVerifier(
 	cfg ethconfig.Zk,
 	executors []*Executor,
 	db kv.RwDB,
+	dbsmt kv.RwDB,
 	witnessGenerator WitnessGenerator,
 	streamServer server.DataStreamServer,
 ) *LegacyExecutorVerifier {
@@ -145,6 +152,8 @@ func NewLegacyExecutorVerifier(
 		WitnessGenerator:       witnessGenerator,
 		promises:               make([]*Promise[*VerifierBundle], 0),
 		mtxPromises:            &sync.Mutex{},
+		// For X Layer, split db and ac
+		dbsmt: dbsmt,
 	}
 }
 
@@ -156,6 +165,7 @@ func (v *LegacyExecutorVerifier) StartAsyncVerification(
 	counters map[string]int,
 	blockNumbers []uint64,
 	useRemoteExecutor bool,
+	useMockExecutor bool,
 	requestTimeout time.Duration,
 	retries int,
 ) {
@@ -164,6 +174,10 @@ func (v *LegacyExecutorVerifier) StartAsyncVerification(
 	request := NewVerifierRequestWithLimits(forkId, batchNumber, blockNumbers, stateRoot, counters, requestTimeout, retries)
 	if useRemoteExecutor {
 		promise = v.VerifyAsync(request)
+	} else if useMockExecutor {
+		// For X Layer, support mock executor
+		log.Warn(fmt.Sprintf("[%s] Only for testing use. Generate the witness and return the verifierBundle without actually sending payload to executor.", logPrefix))
+		promise = v.VerifyWithMockExecutor(request)
 	} else {
 		promise = v.VerifyWithoutExecutor(request)
 	}
@@ -244,7 +258,27 @@ func (v *LegacyExecutorVerifier) VerifyAsync(request *VerifierRequest) *Promise[
 			return verifierBundle, err
 		}
 
-		witness, err := v.WitnessGenerator.GetWitnessByBlockRange(tx, innerCtx, blockNumbers[0], blockNumbers[len(blockNumbers)-1], false, v.cfg.WitnessFull)
+		// For X Layer, split db and ac
+		var txsmt kv.Tx = nil
+		if v.dbsmt != nil {
+			txsmt, err = v.dbsmt.BeginRo(innerCtx)
+			if err != nil {
+				return verifierBundle, err
+			}
+			defer txsmt.Rollback()
+		}
+
+		latestBlock, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return nil, err
+		}
+
+		block := minUint64(latestBlock, blockNumbers[len(blockNumbers)-1])
+		cache := map[string]map[string][]byte{}
+		if v.cache != nil {
+			cache = v.cache.CascadeGetCurrentBatchSnapshotCache(block)
+		}
+		witness, err := v.WitnessGenerator.GetWitnessByBlockRange(tx, txsmt, innerCtx, blockNumbers[0], blockNumbers[len(blockNumbers)-1], false, v.cfg.WitnessFull, cache)
 		if err != nil {
 			return verifierBundle, err
 		}

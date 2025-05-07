@@ -35,9 +35,9 @@ const (
 
 var (
 	// ErrFileEntryNotFound denotes error that is returned when the certain file entry is not found in the datastream
-	ErrFileEntryNotFound = errors.New("file entry not found")
-
-	minimumCheckTimeout = 500 * time.Millisecond
+	ErrFileEntryNotFound       = errors.New("file entry not found")
+	ErrReachedEntryNumberLimit = errors.New("reached entry number limit") // For X Layer, fix ds receive issue
+	minimumCheckTimeout        = 500 * time.Millisecond
 )
 
 type StreamClient struct {
@@ -543,6 +543,10 @@ LOOP:
 
 		if readNewProto {
 			if parsedProto, entryNum, err = ReadParsedProto(c); err != nil {
+				// For X Layer, fix ds receive issue
+				if err == ErrReachedEntryNumberLimit {
+					return c.trySendStopSignal()
+				}
 				return err
 			}
 			readNewProto = false
@@ -570,29 +574,36 @@ LOOP:
 			time.Sleep(10 * time.Microsecond)
 		}
 
-		if c.header.TotalEntries == entryNum+1 {
+		if c.header.TotalEntries < entryNum {
 			log.Trace("[Datastream client] reached the current end of the stream", "header_totalEntries", c.header.TotalEntries, "entryNum", entryNum)
 
-			retries := 0
-		INTERNAL_LOOP:
-			for {
-				select {
-				case c.entryChan <- nil:
-					break INTERNAL_LOOP
-				default:
-					if retries > 5 {
-						return errors.New("[Datastream client] failed to write final entry to channel after 5 retries")
-					}
-					retries++
-					log.Warn("[Datastream client] Channel is full, waiting to write nil and end stream client read")
-					time.Sleep(1 * time.Second)
-				}
+			// For X Layer, fix ds receive issue
+			if err := c.trySendStopSignal(); err != nil {
+				return err
 			}
 			break LOOP
 		}
 	}
 
 	return nil
+}
+
+// For X Layer, fix ds receive issue
+func (c *StreamClient) trySendStopSignal() error {
+	retries := 0
+	for {
+		select {
+		case c.entryChan <- nil:
+			return nil
+		default:
+			if retries > 5 {
+				return errors.New("[Datastream client] failed to write final entry to channel after 5 retries")
+			}
+			retries++
+			log.Warn("[Datastream client] Channel is full, waiting to write nil and end stream client read")
+			time.Sleep(1 * time.Second)
+		}
+	}
 }
 
 func (c *StreamClient) HandleStart() error {
@@ -728,7 +739,9 @@ func ReadParsedProto(iterator FileEntryIterator) (
 				return
 			}
 			if entryNum == iterator.GetEntryNumberLimit() {
-				break LOOP
+				// For X Layer, fix ds receive issue
+				err = ErrReachedEntryNumberLimit
+				return
 			}
 		}
 

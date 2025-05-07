@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -56,8 +57,15 @@ type HasChangeSetWriter interface {
 	ChangeSetWriter() *state.ChangeSetWriter
 }
 
+// Designed to be used to call the normal stage loop hook earlier in the process as we want this to be
+// done per block rather than per batch.
+type DoneHook interface {
+	AfterRun(tx kv.Tx, finishProgressBefore uint64, prevUnwindPoint *uint64) error
+}
+
 type SequenceBlockCfg struct {
 	db            kv.RwDB
+	dbsmt         kv.RwDB
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	changeSetHook stagedsync.ChangeSetHook
@@ -85,10 +93,14 @@ type SequenceBlockCfg struct {
 	yieldSize      uint16
 
 	infoTreeUpdater *l1infotree.Updater
+
+	decodedTxCache *expirable.LRU[common.Hash, *types.Transaction]
+	doneHook       DoneHook
 }
 
 func StageSequenceBlocksCfg(
 	db kv.RwDB,
+	dbsmt kv.RwDB,
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook stagedsync.ChangeSetHook,
@@ -114,6 +126,7 @@ func StageSequenceBlocksCfg(
 	legacyVerifier *verifier.LegacyExecutorVerifier,
 	yieldSize uint16,
 	infoTreeUpdater *l1infotree.Updater,
+	doneHook DoneHook,
 ) SequenceBlockCfg {
 
 	return SequenceBlockCfg{
@@ -141,6 +154,10 @@ func StageSequenceBlocksCfg(
 		legacyVerifier:   legacyVerifier,
 		yieldSize:        yieldSize,
 		infoTreeUpdater:  infoTreeUpdater,
+		doneHook:         doneHook,
+
+		// For X Layer, split db and ac
+		dbsmt: dbsmt,
 	}
 }
 
@@ -312,6 +329,7 @@ func prepareL1AndInfoTreeRelatedStuff(sdb *stageDb, batchState *BatchState, prop
 			if batchState.resequenceBatchJob.AtNewBlockBoundary() {
 				l1TreeUpdateIndex = uint64(batchState.resequenceBatchJob.CurrentBlock().L1InfoTreeIndex)
 			}
+			// For X Layer, fix mismatch issue
 			if infoTreeIndexProgress >= l1TreeUpdateIndex {
 				shouldWriteGerToContract = false
 			}
@@ -431,7 +449,7 @@ func updateSequencerProgress(tx kv.RwTx, newHeight uint64, newBatch uint64, unwi
 	return nil
 }
 
-func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, streamWriter *SequencerBatchStreamWriter, u stagedsync.Unwinder, latestBlock uint64) (bool, bool, error) {
+func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, streamWriter *SequencerBatchStreamWriter, u stagedsync.Unwinder, latestBlock uint64, s *stagedsync.StageState) (bool, bool, error) {
 	if batchContext.cfg.zk.SequencerHaltOnBatchNumber != 0 && batchContext.cfg.zk.SequencerHaltOnBatchNumber == batchState.batchNumber {
 		log.Info(fmt.Sprintf("[%s] Attempting to halt on batch %v, checking for pending verifications", batchContext.s.LogPrefix(), batchState.batchNumber))
 
@@ -440,8 +458,7 @@ func tryHaltSequencer(batchContext *BatchContext, batchState *BatchState, stream
 		for {
 			if pending, count := batchContext.cfg.legacyVerifier.HasPendingVerifications(); pending {
 				log.Info(fmt.Sprintf("[%s] Waiting for pending verifications to complete before halting sequencer...", batchContext.s.LogPrefix()), "count", count)
-				time.Sleep(2 * time.Second)
-				needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u)
+				needsUnwind, err := updateStreamAndCheckRollback(batchContext, batchState, streamWriter, u, s)
 				if needsUnwind || err != nil {
 					return needsUnwind, false, err
 				}

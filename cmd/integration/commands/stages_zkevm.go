@@ -32,7 +32,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *stagedsync.Sync) {
+// For X Layer, split db
+func newSyncZk(ctx context.Context, db, dbsmt kv.RwDB) (consensus.Engine, *vm.Config, *stagedsync.Sync) {
 	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
 	vmConfig := &vm.Config{}
@@ -125,6 +126,7 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 		stages = stages2.NewSequencerZkStages(
 			context.Background(),
 			db,
+			dbsmt,
 			&cfg,
 			sentryControlServer,
 			&shards.Notifications{},
@@ -141,11 +143,13 @@ func newSyncZk(ctx context.Context, db kv.RwDB) (consensus.Engine, *vm.Config, *
 			nil,
 			nil,
 			nil,
+			nil,
 		)
 	} else {
 		stages = stages2.NewDefaultZkStages(
 			context.Background(),
 			db,
+			dbsmt,
 			&cfg,
 			sentryControlServer,
 			&shards.Notifications{},
